@@ -6,8 +6,8 @@ try:
     from rich.console import Console
     from rich.table import Table
     HAS_RICH = True
-except ImportError:
-    HAS_RICH = False
+except ImportError:  # pragma: no cover
+    HAS_RICH = False  # pragma: no cover
 
 # Ports commonly used by local dev servers, highlighted for quick scanning.
 DEV_PORTS = frozenset({

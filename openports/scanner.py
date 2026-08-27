@@ -14,12 +14,12 @@ from typing import Any, Dict, List, Optional
 try:
     import psutil
     HAS_PSUTIL = True
-except ImportError:
-    HAS_PSUTIL = False
+except ImportError:  # pragma: no cover
+    HAS_PSUTIL = False  # pragma: no cover
     # Create a stub for psutil so it can be mocked in tests
-    class _PsutilStub:
+    class _PsutilStub:  # pragma: no cover
         pass
-    psutil = _PsutilStub()
+    psutil = _PsutilStub()  # pragma: no cover
 
 
 _ENTRY_KEYS = ("port", "pid", "proto", "status", "name", "cmdline",
