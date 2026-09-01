@@ -13,3 +13,8 @@ source = ["openports"]
 [tool.coverage.report]
 show_missing = true
 fail_under = 100
+exclude_lines = [
+    "pragma: no cover",
+    "if HAS_PSUTIL:",
+    "if HAS_RICH:",
+]
