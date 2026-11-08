@@ -109,6 +109,67 @@ def test_find_pids_windows_handles_subprocess_failure(monkeypatch):
     assert scanner._find_pids_windows(80) == []
 
 
+def test_find_pids_windows_includes_udp_lines(monkeypatch):
+    """UDP lines (4 columns, no State) are matched by port and PID.
+
+    Regression test: the parser previously required >=5 columns, so
+    `kill_port` on a UDP-only port silently found nothing.
+    """
+    netstat_output = (
+        "Active Connections\n"
+        "\n"
+        "  Proto  Local Address          Foreign Address        State           PID\n"
+        "  TCP    0.0.0.0:80             0.0.0.0:0              LISTENING       1234\n"
+        "\n"
+        "  Proto  Local Address          Foreign Address        PID\n"
+        "  UDP    0.0.0.0:53             *:*                                    9999\n"
+    )
+    monkeypatch.setattr("openports.scanner.HAS_PSUTIL", False)
+    monkeypatch.setattr("openports.scanner.platform.system", lambda: "Windows")
+    monkeypatch.setattr(
+        "openports.scanner.subprocess.check_output",
+        lambda *a, **k: netstat_output.encode(),
+    )
+
+    scanner = PortScanner()
+    assert scanner._find_pids_windows(53) == [9999]
+    assert scanner._find_pids_windows(80) == [1234]
+
+
+def test_find_pids_windows_survives_blank_and_header_lines(monkeypatch):
+    """Blank lines and section headers never reach parts[0] indexing."""
+    netstat_output = "\nActive Connections\n  TCP    0.0.0.0:80   0.0.0.0:0   LISTENING   1234\n"
+    monkeypatch.setattr("openports.scanner.HAS_PSUTIL", False)
+    monkeypatch.setattr("openports.scanner.platform.system", lambda: "Windows")
+    monkeypatch.setattr(
+        "openports.scanner.subprocess.check_output",
+        lambda *a, **k: netstat_output.encode(),
+    )
+
+    scanner = PortScanner()
+    assert scanner._find_pids_windows(80) == [1234]
+
+
+def test_find_pids_windows_skips_truncated_lines(monkeypatch):
+    """Protocol lines with too few columns are skipped, not parsed."""
+    netstat_output = (
+        "  UDP    0.0.0.0:53   *:*\n"  # truncated UDP line (3 cols)
+        "  TCP    0.0.0.0:80   0.0.0.0:0   LISTENING\n"  # truncated TCP (4 cols)
+        "  TCP    0.0.0.0:81   0.0.0.0:0   LISTENING   4321\n"
+    )
+    monkeypatch.setattr("openports.scanner.HAS_PSUTIL", False)
+    monkeypatch.setattr("openports.scanner.platform.system", lambda: "Windows")
+    monkeypatch.setattr(
+        "openports.scanner.subprocess.check_output",
+        lambda *a, **k: netstat_output.encode(),
+    )
+
+    scanner = PortScanner()
+    assert scanner._find_pids_windows(53) == []
+    assert scanner._find_pids_windows(80) == []
+    assert scanner._find_pids_windows(81) == [4321]
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # _find_pids_unix
 # ─────────────────────────────────────────────────────────────────────────────
@@ -470,6 +531,43 @@ def test_list_windows_skips_malformed_lines(monkeypatch):
     entries = scanner._list_windows(None, None, show_all=True)
     assert len(entries) == 1
     assert entries[0]["port"] == 80
+
+
+def test_list_windows_survives_blank_and_header_lines(monkeypatch):
+    """Real `netstat -ano` output has blank lines and section headers.
+
+    Regression test: blank lines crash the parser at parts[0], and with
+    show_all=False (the default) a blank line made listing abort with
+    IndexError before any port was returned.
+    """
+    netstat_output = (
+        "Active Connections\n"
+        "\n"
+        "  Proto  Local Address          Foreign Address        State           PID\n"
+        "  TCP    0.0.0.0:80             0.0.0.0:0              LISTENING       1234\n"
+        "  TCP    192.168.1.5:52000      93.184.216.34:443      ESTABLISHED     5678\n"
+        "\n"
+        "  Proto  Local Address          Foreign Address        PID\n"
+        "  UDP    0.0.0.0:53             *:*                                    9999\n"
+        "  UDP    0.0.0.0:5353   *:*\n"  # truncated UDP line (3 cols)
+        "  TCP    0.0.0.0:82   0.0.0.0:0   LISTENING\n"  # truncated TCP (4 cols)
+    )
+    monkeypatch.setattr("openports.scanner.HAS_PSUTIL", False)
+    monkeypatch.setattr("openports.scanner.platform.system", lambda: "Windows")
+    monkeypatch.setattr(
+        "openports.scanner.subprocess.check_output",
+        lambda *a, **k: netstat_output.encode(),
+    )
+
+    scanner = PortScanner()
+    entries = scanner._list_windows(None, None, show_all=False)
+    assert [(e["port"], e["status"]) for e in entries] == [(80, "LISTENING")]
+    entries_all = scanner._list_windows(None, None, show_all=True)
+    ports = sorted(e["port"] for e in entries_all)
+    assert ports == [53, 80, 52000]
+    udp = [e for e in entries_all if e["port"] == 53][0]
+    assert udp["proto"] == "UDP"
+    assert udp["status"] == "UDP"
 
 
 def test_list_windows_search_filter(monkeypatch):
